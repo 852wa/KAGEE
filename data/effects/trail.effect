@@ -1,0 +1,54 @@
+// Kagee Motion Trail: feedback accumulation (premultiplied alpha)
+uniform float4x4 ViewProj;
+uniform texture2d image;
+uniform texture2d prev;
+uniform float  decay;
+uniform int    mode;   // 0 echo (behind), 1 lighten, 2 additive, 3 ghost (mix)
+uniform float4 tint;
+uniform float2 drift;  // uv offset applied to the previous frame each step
+uniform float  zoom;   // scale applied to the previous frame each step
+
+sampler_state linearClamp {
+	Filter   = Linear;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;
+};
+
+VertData VSDefault(VertData v_in)
+{
+	VertData vert_out;
+	vert_out.pos = mul(float4(v_in.pos.xyz, 1.0), ViewProj);
+	vert_out.uv  = v_in.uv;
+	return vert_out;
+}
+
+float4 PSTrail(VertData v_in) : TARGET
+{
+	float4 cur = image.Sample(linearClamp, v_in.uv);
+	float2 puv = (v_in.uv - 0.5) / zoom + 0.5 - drift;
+	float inside = step(0.0, puv.x) * step(puv.x, 1.0) * step(0.0, puv.y) * step(puv.y, 1.0);
+	float4 pr = prev.Sample(linearClamp, puv) * inside;
+	pr.rgb *= tint.rgb;
+	if (mode == 3)
+		return lerp(cur, pr, decay * inside);
+	float4 p = pr * decay;
+	if (mode == 1)
+		return max(cur, p);
+	if (mode == 2)
+		return saturate(cur + p);
+	return cur + p * (1.0 - cur.a);
+}
+
+technique Trail
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSTrail(v_in);
+	}
+}

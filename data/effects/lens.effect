@@ -1,0 +1,123 @@
+// Kagee Lens: distortion, chromatic aberration, sharpen, grain, vignette, letterbox
+// input/output: premultiplied alpha
+uniform float4x4 ViewProj;
+uniform texture2d image;
+
+uniform float2 texel;        // 1/size
+uniform float  aspect;       // width/height
+uniform float  distortion;   // -1..1
+uniform float  dist_zoom;    // compensation scale
+uniform float  ca_amount;    // 0..1
+uniform float  sharpen;      // 0..2
+uniform float  grain;        // 0..1
+uniform float  grain_size;   // px
+uniform float  seed;
+uniform float  vig_amount;   // 0..1
+uniform float  vig_radius;   // 0..1.5
+uniform float  vig_soft;     // 0..1
+uniform float  vig_round;    // 0..1
+uniform float4 vig_color;
+uniform float  lb_ratio;     // 0 = off, else target aspect
+uniform float4 lb_color;
+
+sampler_state linearClamp {
+	Filter   = Linear;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;
+};
+
+VertData VSDefault(VertData v_in)
+{
+	VertData vert_out;
+	vert_out.pos = mul(float4(v_in.pos.xyz, 1.0), ViewProj);
+	vert_out.uv  = v_in.uv;
+	return vert_out;
+}
+
+float hash12(float2 p)
+{
+	float3 p3 = frac(float3(p.xyx) * 0.1031);
+	p3 += dot(p3, p3.yzx + 33.33);
+	return frac((p3.x + p3.y) * p3.z);
+}
+
+float2 distort_uv(float2 uv)
+{
+	float2 p = uv - 0.5;
+	p.x *= aspect;
+	float r2 = dot(p, p);
+	p *= (1.0 + distortion * r2) * dist_zoom;
+	p.x /= aspect;
+	return p + 0.5;
+}
+
+float4 PSLens(VertData v_in) : TARGET
+{
+	float2 uv = distort_uv(v_in.uv);
+
+	// chromatic aberration: split channels radially
+	float2 dir = uv - 0.5;
+	float2 ca = dir * ca_amount * 0.03;
+	float4 cg = image.Sample(linearClamp, uv);
+	float4 c = cg;
+	if (ca_amount > 0.0) {
+		float4 cr = image.Sample(linearClamp, uv + ca);
+		float4 cb = image.Sample(linearClamp, uv - ca);
+		c = float4(cr.r, cg.g, cb.b, max(max(cr.a, cg.a), cb.a));
+	}
+
+	if (sharpen > 0.0) {
+		float4 n = image.Sample(linearClamp, uv + float2(texel.x, 0.0));
+		n += image.Sample(linearClamp, uv - float2(texel.x, 0.0));
+		n += image.Sample(linearClamp, uv + float2(0.0, texel.y));
+		n += image.Sample(linearClamp, uv - float2(0.0, texel.y));
+		c.rgb += (c.rgb - n.rgb * 0.25) * sharpen;
+		c.rgb = clamp(c.rgb, 0.0, c.a);
+	}
+
+	// outside the distorted frame
+	if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0)
+		c = float4(0.0, 0.0, 0.0, 0.0);
+
+	if (grain > 0.0) {
+		float2 gp = floor(v_in.uv / (texel * max(grain_size, 1.0)));
+		float n = hash12(gp + seed * 17.31) - 0.5;
+		c.rgb = saturate(c.rgb + n * grain * 0.35 * c.a);
+	}
+
+	if (vig_amount > 0.0) {
+		float2 q = v_in.uv - 0.5;
+		q.x *= lerp(1.0, aspect, vig_round);
+		float d = length(q) * 2.0 / lerp(1.0, aspect, vig_round * 0.5);
+		float v = smoothstep(vig_radius, vig_radius + max(vig_soft, 0.001), d) * vig_amount;
+		float4 vc = float4(vig_color.rgb * vig_color.a, vig_color.a);
+		c.rgb = lerp(c.rgb, vc.rgb * c.a, v * vig_color.a);
+	}
+
+	if (lb_ratio > 0.0) {
+		if (aspect > lb_ratio) {
+			float w = lb_ratio / aspect;
+			if (abs(v_in.uv.x - 0.5) > w * 0.5)
+				c = float4(lb_color.rgb * lb_color.a, lb_color.a);
+		} else {
+			float h = aspect / lb_ratio;
+			if (abs(v_in.uv.y - 0.5) > h * 0.5)
+				c = float4(lb_color.rgb * lb_color.a, lb_color.a);
+		}
+	}
+	return c;
+}
+
+technique Draw
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSLens(v_in);
+	}
+}

@@ -1,0 +1,8 @@
+build/
+dist/
+.deps/
+sdk/lib/*.lib
+sdk/lib/*.exp
+test/out/
+test/assets/
+__pycache__/

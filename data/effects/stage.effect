@@ -1,0 +1,37 @@
+// Kagee 3D Stage: draws one premultiplied layer with opacity
+uniform float4x4 ViewProj;
+uniform texture2d image;
+uniform float opacity;
+
+sampler_state linearClamp {
+	Filter   = Linear;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;
+};
+
+VertData VSDefault(VertData v_in)
+{
+	VertData vert_out;
+	vert_out.pos = mul(float4(v_in.pos.xyz, 1.0), ViewProj);
+	vert_out.uv  = v_in.uv;
+	return vert_out;
+}
+
+float4 PSLayer(VertData v_in) : TARGET
+{
+	return image.Sample(linearClamp, v_in.uv) * opacity;
+}
+
+technique Layer
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSLayer(v_in);
+	}
+}

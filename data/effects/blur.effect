@@ -1,0 +1,69 @@
+// Kagee: separable gaussian blur + downsample (premultiplied alpha in/out)
+uniform float4x4 ViewProj;
+uniform texture2d image;
+
+uniform float2 tap_step;  // uv offset between taps (direction * spacing)
+uniform float sigma;   // gaussian sigma in tap units
+uniform float2 src_texel; // 1 / source size (for Down)
+uniform float down_scale;    // half downsample factor (for Down)
+
+sampler_state linearClamp {
+	Filter   = Linear;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;
+};
+
+VertData VSDefault(VertData v_in)
+{
+	VertData vert_out;
+	vert_out.pos = mul(float4(v_in.pos.xyz, 1.0), ViewProj);
+	vert_out.uv  = v_in.uv;
+	return vert_out;
+}
+
+float4 PSBlur(VertData v_in) : TARGET
+{
+	float4 acc = image.Sample(linearClamp, v_in.uv);
+	float wsum = 1.0;
+	float inv = 1.0 / (2.0 * sigma * sigma);
+	for (int i = 1; i <= 16; i++) {
+		float w = exp(-(float)(i * i) * inv);
+		float2 o = tap_step * (float)i;
+		acc += (image.Sample(linearClamp, v_in.uv + o) + image.Sample(linearClamp, v_in.uv - o)) * w;
+		wsum += 2.0 * w;
+	}
+	return acc / wsum;
+}
+
+float4 PSDown(VertData v_in) : TARGET
+{
+	float2 o = src_texel * down_scale;
+	float4 c = image.Sample(linearClamp, v_in.uv + float2(-o.x, -o.y));
+	c += image.Sample(linearClamp, v_in.uv + float2( o.x, -o.y));
+	c += image.Sample(linearClamp, v_in.uv + float2(-o.x,  o.y));
+	c += image.Sample(linearClamp, v_in.uv + float2( o.x,  o.y));
+	return c * 0.25;
+}
+
+technique Blur
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSBlur(v_in);
+	}
+}
+
+technique Down
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSDown(v_in);
+	}
+}

@@ -1,0 +1,51 @@
+// Color Grade: one 3D LUT lookup (premultiplied alpha in/out)
+uniform float4x4 ViewProj;
+uniform texture2d image;
+uniform texture3d clut;
+uniform float3 clut_scale;
+uniform float3 clut_offset;
+uniform float split; // < 0: off, else uv.x split position (left = original)
+
+sampler_state linearClamp {
+	Filter   = Linear;
+	AddressU = Clamp;
+	AddressV = Clamp;
+	AddressW = Clamp;
+};
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;
+};
+
+VertData VSDefault(VertData v_in)
+{
+	VertData vert_out;
+	vert_out.pos = mul(float4(v_in.pos.xyz, 1.0), ViewProj);
+	vert_out.uv  = v_in.uv;
+	return vert_out;
+}
+
+float4 PSGrade(VertData v_in) : TARGET
+{
+	float4 c = image.Sample(linearClamp, v_in.uv);
+	if (split >= 0.0 && v_in.uv.x < split) {
+		// thin divider line for the before/after view
+		if (split - v_in.uv.x < 0.0015)
+			return float4(1.0, 1.0, 1.0, 1.0);
+		return c;
+	}
+	float a = c.a;
+	float3 rgb = saturate(c.rgb / max(a, 0.0001));
+	rgb = clut.Sample(linearClamp, rgb * clut_scale + clut_offset).rgb;
+	return float4(rgb * a, a);
+}
+
+technique Draw
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSGrade(v_in);
+	}
+}

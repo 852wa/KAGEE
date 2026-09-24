@@ -1,0 +1,320 @@
+// Kagee Retro: VHS / CRT / 8mm film / video game / LED panel / halftone
+// input/output: premultiplied alpha
+uniform float4x4 ViewProj;
+uniform texture2d image;
+
+uniform int    mode;
+uniform float2 size;        // px
+uniform float  time;
+uniform float  frame_seed;  // changes at film frame rate
+uniform float  mix_amount;  // 0..1
+uniform float  noise_amt;   // 0..1
+uniform float  scanline;    // 0..1
+uniform float  jitter;      // 0..1
+uniform float  curvature;   // 0..1
+uniform float  fade;        // 0..1 (sepia/fade for film, desat for vhs)
+uniform float  pixel_size;  // px
+uniform float  levels;      // colour steps per channel
+uniform int    palette;     // 0 rgb, 1 green 4-shade, 2 1-bit, 3 cyan/magenta 4-colour
+uniform float  dither;      // 0..1
+
+sampler_state linearClamp {
+	Filter   = Linear;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+sampler_state pointClamp {
+	Filter   = Point;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;
+};
+
+VertData VSDefault(VertData v_in)
+{
+	VertData vert_out;
+	vert_out.pos = mul(float4(v_in.pos.xyz, 1.0), ViewProj);
+	vert_out.uv  = v_in.uv;
+	return vert_out;
+}
+
+float hash12(float2 p)
+{
+	float3 p3 = frac(float3(p.xyx) * 0.1031);
+	p3 += dot(p3, p3.yzx + 33.33);
+	return frac((p3.x + p3.y) * p3.z);
+}
+
+float vnoise(float x)
+{
+	float i = floor(x);
+	float f = frac(x);
+	float u = f * f * (3.0 - 2.0 * f);
+	return lerp(hash12(float2(i, 0.37)), hash12(float2(i + 1.0, 0.37)), u);
+}
+
+float bayer2(float2 a)
+{
+	a = floor(a);
+	return frac(dot(a, float2(0.5, a.y * 0.75)));
+}
+
+float bayer4(float2 a) { return bayer2(0.5 * a) * 0.25 + bayer2(a); }
+float bayer8(float2 a) { return bayer4(0.5 * a) * 0.25 + bayer2(a); }
+
+float4 unpremul(float4 c)
+{
+	return float4(c.rgb / max(c.a, 0.0001), c.a);
+}
+
+float4 premul(float4 c)
+{
+	return float4(c.rgb * c.a, c.a);
+}
+
+float3 rgb2yiq(float3 c)
+{
+	return float3(dot(c, float3(0.299, 0.587, 0.114)),
+		      dot(c, float3(0.596, -0.274, -0.322)),
+		      dot(c, float3(0.211, -0.523, 0.312)));
+}
+
+float3 yiq2rgb(float3 c)
+{
+	return float3(c.x + 0.956 * c.y + 0.621 * c.z,
+		      c.x - 0.272 * c.y - 0.647 * c.z,
+		      c.x - 1.106 * c.y + 1.703 * c.z);
+}
+
+float luma(float3 c) { return dot(c, float3(0.299, 0.587, 0.114)); }
+
+// ---------------------------------------------------------------- VHS
+float4 vhs(float2 uv)
+{
+	float ln = floor(uv.y * size.y / 2.0);
+	// per-line horizontal jitter + slow wobble
+	float j = (hash12(float2(ln, floor(time * 30.0))) - 0.5) * 0.004 * jitter;
+	j += sin(uv.y * 30.0 + time * 2.0) * 0.0015 * jitter;
+	// tracking band rolling down the frame
+	float band_y = frac(time * 0.07);
+	float band = smoothstep(0.06, 0.0, abs(uv.y - band_y)) * noise_amt;
+	j += band * (hash12(float2(ln, time)) - 0.5) * 0.05;
+	// head switching noise_amt at the bottom
+	float head = smoothstep(0.965, 1.0, uv.y);
+	j += head * 0.03 * (hash12(float2(ln, time * 7.0)) - 0.2) * (noise_amt + jitter) * 0.5;
+
+	float2 p = uv + float2(j, 0.0);
+	float4 c = unpremul(image.Sample(linearClamp, p));
+
+	// chroma bleed: blur chroma horizontally and shift it right
+	float3 yiq = rgb2yiq(c.rgb);
+	float2 chroma = float2(0.0, 0.0);
+	float px = 1.0 / size.x;
+	for (int i = 0; i < 8; i++) {
+		float4 s = unpremul(image.Sample(linearClamp, p - float2(px * (float)(i * 2 + 2), 0.0)));
+		chroma += rgb2yiq(s.rgb).yz;
+	}
+	yiq.yz = lerp(yiq.yz, chroma / 8.0, 0.8);
+	yiq.yz *= 1.0 - fade * 0.6;
+	c.rgb = yiq2rgb(yiq);
+
+	// snow + scanlines
+	float n = hash12(uv * size + time * 91.0);
+	c.rgb += (n - 0.5) * noise_amt * 0.25 + band * n * 0.5;
+	c.rgb *= 1.0 - scanline * 0.25 * (0.5 + 0.5 * sin(uv.y * size.y * 3.14159));
+	c.rgb = lerp(c.rgb, c.rgb * float3(1.05, 0.98, 1.1), 0.5); // slight tape tint
+	return premul(saturate(c));
+}
+
+// ---------------------------------------------------------------- CRT
+float4 crt(float2 uv)
+{
+	float2 q = uv * 2.0 - 1.0;
+	q *= 1.0 + curvature * 0.25 * float2(q.y * q.y, q.x * q.x);
+	float2 p = q * 0.5 + 0.5;
+	if (p.x < 0.0 || p.x > 1.0 || p.y < 0.0 || p.y > 1.0)
+		return float4(0.0, 0.0, 0.0, 1.0);
+
+	float4 c = unpremul(image.Sample(linearClamp, p));
+	// cheap glow from neighbours
+	float2 o = 1.5 / size;
+	float3 glow = unpremul(image.Sample(linearClamp, p + float2(o.x, 0.0))).rgb;
+	glow += unpremul(image.Sample(linearClamp, p - float2(o.x, 0.0))).rgb;
+	c.rgb = lerp(c.rgb, max(c.rgb, glow * 0.5), 0.5);
+
+	float lines = 480.0;
+	float sl = 0.5 + 0.5 * cos(p.y * lines * 6.28318);
+	c.rgb *= 1.0 - scanline * 0.45 * sl;
+	// aperture grille
+	float m = frac(uv.x * size.x / 3.0);
+	float3 mask = m < 0.333 ? float3(1.0, 0.7, 0.7) : (m < 0.666 ? float3(0.7, 1.0, 0.7) : float3(0.7, 0.7, 1.0));
+	c.rgb *= lerp(float3(1.0, 1.0, 1.0), mask, scanline * 0.6);
+	c.rgb *= 1.0 + 0.03 * sin(time * 50.0) * noise_amt; // flicker
+	c.rgb += (hash12(uv * size + time) - 0.5) * noise_amt * 0.12;
+	// edge vignette
+	float2 e = smoothstep(float2(0.0, 0.0), float2(0.04, 0.04), p) * smoothstep(float2(0.0, 0.0), float2(0.04, 0.04), 1.0 - p);
+	c.rgb *= e.x * e.y;
+	c.rgb *= 1.15;
+	return premul(saturate(c));
+}
+
+// ---------------------------------------------------------------- 8mm film
+float4 film(float2 uv)
+{
+	// gate weave
+	float2 weave = float2(hash12(float2(frame_seed, 1.0)) - 0.5, hash12(float2(frame_seed, 2.0)) - 0.5);
+	float2 p = uv + weave * 0.004 * jitter;
+	float4 c = unpremul(image.Sample(linearClamp, p));
+
+	// fade + sepia
+	float l = luma(c.rgb);
+	float3 sepia = float3(l * 1.07, l * 0.87, l * 0.68);
+	c.rgb = lerp(c.rgb, sepia, fade);
+	c.rgb = lerp(c.rgb, float3(0.12, 0.1, 0.08) + c.rgb * 0.85, fade * 0.5);
+
+	// flicker
+	c.rgb *= 1.0 + (hash12(float2(frame_seed, 3.0)) - 0.5) * 0.18 * noise_amt;
+
+	// grain
+	c.rgb += (hash12(floor(uv * size / 1.5) + frame_seed * 13.0) - 0.5) * noise_amt * 0.22;
+
+	// vertical scratches
+	for (int i = 0; i < 3; i++) {
+		float fi = (float)i;
+		float r = hash12(float2(frame_seed, 10.0 + fi));
+		if (r < 0.45 * scanline) {
+			float x = hash12(float2(frame_seed, 20.0 + fi));
+			float d = abs(uv.x - x) * size.x;
+			c.rgb = lerp(c.rgb, float3(0.95, 0.92, 0.85), smoothstep(1.5, 0.0, d) * 0.6);
+		}
+	}
+	// dust specks
+	float2 cell = floor(uv * float2(40.0, 22.0));
+	float h = hash12(cell + frame_seed * 7.0);
+	if (h > 1.0 - 0.02 * scanline) {
+		float2 f = frac(uv * float2(40.0, 22.0)) - 0.5;
+		c.rgb *= lerp(1.0, 0.1, smoothstep(0.12, 0.0, length(f)));
+	}
+	// vignette
+	float2 q = uv - 0.5;
+	c.rgb *= 1.0 - dot(q, q) * 1.2 * (0.4 + fade);
+	return premul(saturate(c));
+}
+
+// ---------------------------------------------------------------- palettes
+float3 quantize(float3 c, float2 px)
+{
+	float d = (bayer8(px) - 0.5) * dither;
+	if (palette == 1) { // green 4-shade
+		float l = saturate(luma(c) + d / 4.0);
+		float idx = floor(l * 3.999);
+		if (idx < 1.0) return float3(0.059, 0.220, 0.059);
+		if (idx < 2.0) return float3(0.188, 0.384, 0.188);
+		if (idx < 3.0) return float3(0.545, 0.675, 0.059);
+		return float3(0.608, 0.737, 0.059);
+	}
+	if (palette == 2) { // 1-bit
+		return luma(c) + d * 0.9 > 0.5 ? float3(1.0, 1.0, 1.0) : float3(0.0, 0.0, 0.0);
+	}
+	if (palette == 3) { // 4 colours: black, cyan, magenta, white
+		float3 pal0 = float3(0.0, 0.0, 0.0);
+		float3 pal1 = float3(0.33, 1.0, 1.0);
+		float3 pal2 = float3(1.0, 0.33, 1.0);
+		float3 pal3 = float3(1.0, 1.0, 1.0);
+		float3 cc = saturate(c + d * 0.3);
+		float3 best = pal0;
+		float bd = distance(cc, pal0);
+		float dd = distance(cc, pal1); if (dd < bd) { bd = dd; best = pal1; }
+		dd = distance(cc, pal2); if (dd < bd) { bd = dd; best = pal2; }
+		dd = distance(cc, pal3); if (dd < bd) { bd = dd; best = pal3; }
+		return best;
+	}
+	float n = max(levels - 1.0, 1.0);
+	return floor(saturate(c + d / n) * n + 0.5) / n;
+}
+
+float4 game(float2 uv)
+{
+	float2 cells = size / max(pixel_size, 1.0);
+	float2 cell = floor(uv * cells);
+	float2 p = (cell + 0.5) / cells;
+	float4 c = unpremul(image.Sample(pointClamp, p));
+	c.rgb = quantize(c.rgb, cell);
+	c.a = c.a > 0.5 ? 1.0 : 0.0;
+	return premul(c);
+}
+
+// ---------------------------------------------------------------- LED panel
+float4 led(float2 uv)
+{
+	float2 cells = size / max(pixel_size, 2.0);
+	float2 cell = floor(uv * cells);
+	float2 p = (cell + 0.5) / cells;
+	float4 c = unpremul(image.Sample(linearClamp, p));
+	if (levels < 255.0)
+		c.rgb = floor(c.rgb * levels + 0.5) / levels;
+	float2 f = frac(uv * cells) - 0.5;
+	float d = length(f);
+	float dotm = smoothstep(0.45, 0.3, d);
+	float halo = smoothstep(0.7, 0.2, d) * 0.25;
+	float3 off = float3(0.03, 0.03, 0.035);
+	float3 col = off + c.rgb * (dotm * 1.3 + halo);
+	col *= 1.0 - scanline * 0.3 * step(0.4, abs(f.y));
+	return float4(col, 1.0);
+}
+
+// ---------------------------------------------------------------- halftone
+float4 halftone(float2 uv)
+{
+	float s = max(pixel_size, 3.0);
+	float ang = 0.785398;
+	float ca = cos(ang);
+	float sa = sin(ang);
+	float2 q = uv * size;
+	float2 pp = float2(q.x * ca - q.y * sa, q.x * sa + q.y * ca) / s;
+	float2 cell = (floor(pp) + 0.5) * s;
+	float2 center = float2(cell.x * ca + cell.y * sa, -cell.x * sa + cell.y * ca) / size;
+	float4 c = unpremul(image.Sample(linearClamp, center));
+	float l = luma(c.rgb);
+	float r = sqrt(1.0 - l) * 0.75;
+	float d = length(frac(pp) - 0.5);
+	float ink = smoothstep(r + 0.06, r - 0.06, d);
+	float3 paper = float3(0.96, 0.94, 0.88);
+	float3 inkc = lerp(float3(0.08, 0.08, 0.1), c.rgb * 0.6, fade);
+	float3 col = lerp(paper, inkc, ink);
+	return premul(float4(col, c.a));
+}
+
+float4 PSRetro(VertData v_in) : TARGET
+{
+	float2 uv = v_in.uv;
+	float4 src = image.Sample(linearClamp, uv);
+	float4 fx;
+	if (mode == 0)
+		fx = vhs(uv);
+	else if (mode == 1)
+		fx = crt(uv);
+	else if (mode == 2)
+		fx = film(uv);
+	else if (mode == 3)
+		fx = game(uv);
+	else if (mode == 4)
+		fx = led(uv);
+	else
+		fx = halftone(uv);
+	return lerp(src, fx, mix_amount);
+}
+
+technique Draw
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSRetro(v_in);
+	}
+}

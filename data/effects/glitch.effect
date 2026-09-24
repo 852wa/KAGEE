@@ -1,0 +1,129 @@
+// Kagee Glitch (premultiplied alpha)
+uniform float4x4 ViewProj;
+uniform texture2d image;
+
+uniform float2 size;
+uniform float  time;
+uniform float  seed;       // changes at glitch rate
+uniform float  amount;     // overall envelope 0..1+
+uniform float  rgb_split;  // 0..1
+uniform float  block_amt;  // 0..1
+uniform float  block_size; // px
+uniform float  tear;       // 0..1
+uniform float  warp;       // 0..1 (turbulent displace)
+uniform float  warp_scale;
+uniform float  warp_speed;
+uniform float  color_amt;  // 0..1
+uniform float  scan_noise; // 0..1
+
+sampler_state linearClamp {
+	Filter   = Linear;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;
+};
+
+VertData VSDefault(VertData v_in)
+{
+	VertData vert_out;
+	vert_out.pos = mul(float4(v_in.pos.xyz, 1.0), ViewProj);
+	vert_out.uv  = v_in.uv;
+	return vert_out;
+}
+
+float hash12(float2 p)
+{
+	float3 p3 = frac(float3(p.xyx) * 0.1031);
+	p3 += dot(p3, p3.yzx + 33.33);
+	return frac((p3.x + p3.y) * p3.z);
+}
+
+float vnoise2(float2 p)
+{
+	float2 i = floor(p);
+	float2 f = frac(p);
+	float2 u = f * f * (3.0 - 2.0 * f);
+	float a = hash12(i);
+	float b = hash12(i + float2(1.0, 0.0));
+	float c = hash12(i + float2(0.0, 1.0));
+	float d = hash12(i + float2(1.0, 1.0));
+	return lerp(lerp(a, b, u.x), lerp(c, d, u.x), u.y);
+}
+
+float fbm2(float2 p)
+{
+	float s = 0.0;
+	float a = 0.5;
+	for (int i = 0; i < 4; i++) {
+		s += vnoise2(p) * a;
+		p = p * 2.03 + 11.7;
+		a *= 0.5;
+	}
+	return s;
+}
+
+float4 PSGlitch(VertData v_in) : TARGET
+{
+	float2 uv = v_in.uv;
+	float amt = amount;
+
+	// turbulent displace (continuous, independent of bursts)
+	if (warp > 0.0) {
+		float2 wp = uv * warp_scale + float2(time * warp_speed, -time * warp_speed * 0.7);
+		float2 w = float2(fbm2(wp), fbm2(wp + 19.37)) - 0.5;
+		uv += w * warp * 0.08;
+	}
+
+	// block displacement
+	float2 bs = float2(block_size * 4.0, block_size) / size;
+	float2 bid = floor(uv / bs);
+	float hb = hash12(bid + seed);
+	bool in_block = hb < block_amt * amt * 0.35;
+	if (in_block)
+		uv.x += (hash12(bid + seed + 1.7) - 0.5) * 0.25 * amt;
+
+	// line tearing
+	float ln = floor(uv.y * size.y / 3.0);
+	float hl = hash12(float2(ln, seed * 3.1));
+	if (hl < tear * amt * 0.15)
+		uv.x += (hash12(float2(ln, seed + 5.0)) - 0.5) * 0.08 * amt;
+
+	// rgb split
+	float2 off = float2((hash12(float2(seed, 9.1)) * 0.8 + 0.2) * rgb_split * amt * 0.025, 0.0);
+	if (in_block)
+		off *= 2.5;
+	float4 cr = image.Sample(linearClamp, uv + off);
+	float4 cg = image.Sample(linearClamp, uv);
+	float4 cb = image.Sample(linearClamp, uv - off);
+	float4 c = float4(cr.r, cg.g, cb.b, max(max(cr.a, cg.a), cb.a));
+
+	// colour glitch in some blocks: invert or channel rotate
+	float hc = hash12(bid + seed + 3.3);
+	if (hc < color_amt * amt * 0.2) {
+		if (hash12(bid + seed + 4.4) < 0.5)
+			c.rgb = c.a - c.rgb;
+		else
+			c.rgb = c.gbr;
+	}
+
+	// scan noise
+	if (scan_noise > 0.0) {
+		float n = hash12(float2(ln, floor(time * 60.0)));
+		c.rgb += (n - 0.5) * scan_noise * amt * 0.3 * c.a;
+		c.rgb *= 1.0 - scan_noise * 0.15 * step(0.5, frac(v_in.uv.y * size.y * 0.5));
+	}
+	return saturate(c);
+}
+
+technique Draw
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSGlitch(v_in);
+	}
+}

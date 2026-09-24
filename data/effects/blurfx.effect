@@ -1,0 +1,98 @@
+// Kagee Blur FX: focus-mask composite and radial zoom blur (premultiplied alpha)
+uniform float4x4 ViewProj;
+uniform texture2d image;
+uniform texture2d blurred;
+
+uniform int    shape;     // 0 full, 1 iris, 2 tilt-shift
+uniform float2 center;    // uv
+uniform float  focus;     // radius / half band (uv units, aspect-corrected)
+uniform float  softness;
+uniform float  aspect;
+uniform float  angle;     // radians (tilt-shift)
+uniform float  invert;    // 0/1
+uniform float  zoom;      // radial blur strength
+uniform float  spin;      // rotational blur (radians)
+
+sampler_state linearClamp {
+	Filter   = Linear;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;
+};
+
+VertData VSDefault(VertData v_in)
+{
+	VertData vert_out;
+	vert_out.pos = mul(float4(v_in.pos.xyz, 1.0), ViewProj);
+	vert_out.uv  = v_in.uv;
+	return vert_out;
+}
+
+float focus_mask(float2 uv)
+{
+	float d;
+	float2 p = uv - center;
+	p.x *= aspect;
+	if (shape == 1) {
+		d = length(p);
+	} else if (shape == 2) {
+		float2 n = float2(-sin(angle), cos(angle));
+		d = abs(dot(p, n));
+	} else {
+		return 1.0;
+	}
+	float m = smoothstep(focus, focus + max(softness, 0.0001), d);
+	return lerp(m, 1.0 - m, invert);
+}
+
+float4 PSMask(VertData v_in) : TARGET
+{
+	float4 a = image.Sample(linearClamp, v_in.uv);
+	float4 b = blurred.Sample(linearClamp, v_in.uv);
+	return lerp(a, b, focus_mask(v_in.uv));
+}
+
+float4 PSZoom(VertData v_in) : TARGET
+{
+	float2 d = v_in.uv - center;
+	float4 acc = float4(0.0, 0.0, 0.0, 0.0);
+	float wsum = 0.0;
+	for (int i = 0; i < 32; i++) {
+		float t = (float)i / 31.0;
+		float s = 1.0 - zoom * t;
+		float a = spin * (t - 0.5);
+		float ca = cos(a);
+		float sa = sin(a);
+		float2 q = float2(d.x * aspect, d.y) * s;
+		q = float2(q.x * ca - q.y * sa, q.x * sa + q.y * ca);
+		q.x /= aspect;
+		float w = 1.0 - t * 0.5;
+		acc += image.Sample(linearClamp, center + q) * w;
+		wsum += w;
+	}
+	float4 c = acc / wsum;
+	float4 o = image.Sample(linearClamp, v_in.uv);
+	return lerp(o, c, focus_mask(v_in.uv));
+}
+
+technique Mask
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSMask(v_in);
+	}
+}
+
+technique Zoom
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSZoom(v_in);
+	}
+}

@@ -1,0 +1,80 @@
+// Kagee Glow: bright pass + composite (premultiplied alpha)
+uniform float4x4 ViewProj;
+uniform texture2d image;
+uniform texture2d bloom_a;
+uniform texture2d bloom_b;
+uniform texture2d streak_a;
+uniform texture2d streak_b;
+
+uniform float threshold;
+uniform float knee;
+uniform float saturation;
+uniform float bloom_int;
+uniform float streak_int;
+uniform float4 tint;
+uniform float4 streak_tint;
+uniform int streaks; // 0 none, 1 one texture, 2 two textures
+
+sampler_state linearClamp {
+	Filter   = Linear;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;
+};
+
+VertData VSDefault(VertData v_in)
+{
+	VertData vert_out;
+	vert_out.pos = mul(float4(v_in.pos.xyz, 1.0), ViewProj);
+	vert_out.uv  = v_in.uv;
+	return vert_out;
+}
+
+float4 PSBright(VertData v_in) : TARGET
+{
+	float4 c = image.Sample(linearClamp, v_in.uv);
+	float l = max(max(c.r, c.g), c.b);
+	float w = smoothstep(threshold - knee, threshold + knee, l);
+	float g = dot(c.rgb, float3(0.299, 0.587, 0.114));
+	float3 col = lerp(float3(g, g, g), c.rgb, saturation);
+	return float4(col * w, c.a * w);
+}
+
+float4 PSComposite(VertData v_in) : TARGET
+{
+	float4 base = image.Sample(linearClamp, v_in.uv);
+	float3 glow = (bloom_a.Sample(linearClamp, v_in.uv).rgb * 0.45 +
+		       bloom_b.Sample(linearClamp, v_in.uv).rgb * 0.55) * bloom_int * tint.rgb;
+	if (streaks > 0) {
+		float3 s = streak_a.Sample(linearClamp, v_in.uv).rgb;
+		if (streaks > 1)
+			s = (s + streak_b.Sample(linearClamp, v_in.uv).rgb) * 0.6;
+		glow += s * streak_int * streak_tint.rgb;
+	}
+	// screen blend: highlights bloom without hard clipping
+	glow = saturate(glow);
+	float a = saturate(base.a + max(max(glow.r, glow.g), glow.b) * (1.0 - base.a));
+	return float4(base.rgb + glow * (1.0 - base.rgb), a);
+}
+
+technique Bright
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSBright(v_in);
+	}
+}
+
+technique Composite
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSComposite(v_in);
+	}
+}

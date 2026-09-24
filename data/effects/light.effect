@@ -1,0 +1,126 @@
+// Lighting: ambient darkness + 4 lights (spot / beam / rim). Premultiplied alpha in/out.
+uniform float4x4 ViewProj;
+uniform texture2d image;
+
+uniform float2 size;       // px
+uniform float  time;
+uniform float3 ambient;    // ambient light colour * level
+uniform float  haze_alpha; // 1: beam haze also shows over transparent areas
+
+// per light: a = (x, y, radius, softness)  b = (r, g, b, intensity)  c = (type, angle, width, enabled)
+uniform float4 l0a; uniform float4 l0b; uniform float4 l0c;
+uniform float4 l1a; uniform float4 l1b; uniform float4 l1c;
+uniform float4 l2a; uniform float4 l2b; uniform float4 l2c;
+uniform float4 l3a; uniform float4 l3b; uniform float4 l3c;
+
+sampler_state linearClamp {
+	Filter   = Linear;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;
+};
+
+VertData VSDefault(VertData v_in)
+{
+	VertData vert_out;
+	vert_out.pos = mul(float4(v_in.pos.xyz, 1.0), ViewProj);
+	vert_out.uv  = v_in.uv;
+	return vert_out;
+}
+
+float hash12(float2 p)
+{
+	float3 p3 = frac(float3(p.xyx) * 0.1031);
+	p3 += dot(p3, p3.yzx + 33.33);
+	return frac((p3.x + p3.y) * p3.z);
+}
+
+float vnoise2(float2 p)
+{
+	float2 i = floor(p);
+	float2 f = frac(p);
+	float2 u = f * f * (3.0 - 2.0 * f);
+	return lerp(lerp(hash12(i), hash12(i + float2(1.0, 0.0)), u.x),
+		    lerp(hash12(i + float2(0.0, 1.0)), hash12(i + float2(1.0, 1.0)), u.x), u.y);
+}
+
+// accumulates: lit (multiplies the image) and glow (added on top, e.g. beam haze / rim)
+void apply_light(float2 uv, float4 a, float4 b, float4 c, float alpha, inout float3 lit, inout float3 glow)
+{
+	if (c.w < 0.5)
+		return;
+	float aspect = size.x / size.y;
+	float2 p = (uv - a.xy) * float2(aspect, 1.0); // in units of image height
+	float3 col = b.rgb * b.a;
+	float type = c.x;
+
+	if (type < 0.5) {
+		// spot: soft pool of light
+		float d = length(p) / max(a.z, 0.001);
+		float f = 1.0 - smoothstep(1.0 - max(a.w, 0.001), 1.0, d);
+		lit += col * f;
+	} else if (type < 1.5) {
+		// beam: cone from (x,y) towards angle, with haze and drifting dust
+		float2 dir = float2(sin(c.y), cos(c.y)); // angle 0 = pointing down
+		float2 nrm = float2(-dir.y, dir.x);
+		float along = dot(p, dir);
+		if (along > 0.0) {
+			float across = abs(dot(p, nrm));
+			float halfw = along * tan(c.z * 0.5) + 0.01;
+			float edge = 1.0 - smoothstep(halfw * (1.0 - max(a.w, 0.001)), halfw, across);
+			float fall = exp(-along / max(a.z, 0.001));
+			float dust = 0.75 + 0.5 * vnoise2(float2(along * 6.0 - time * 0.3, across * 40.0 / max(halfw, 0.02)));
+			float f = edge * fall;
+			lit += col * f;
+			glow += col * f * 0.35 * dust;
+		}
+	} else {
+		// rim: light the edges of the subject that face the light (needs alpha)
+		float2 dir = float2(sin(c.y), -cos(c.y)); // direction the light comes FROM (angle 0 = above)
+		float2 texel = 1.0 / size;
+		float w = max(c.z, 1.0);
+		// sample towards the light at several distances: soft falloff into the subject
+		float behind = 0.0;
+		for (int k = 1; k <= 4; k++)
+			behind += image.Sample(linearClamp, uv + dir * texel * w * ((float)k * 0.25)).a;
+		float rim = saturate(alpha - behind * 0.25);
+		rim = rim * rim * (3.0 - 2.0 * rim);
+		glow += col * rim * alpha;
+	}
+}
+
+float4 PSLight(VertData v_in) : TARGET
+{
+	float2 uv = v_in.uv;
+	float4 c = image.Sample(linearClamp, uv);
+	float a = c.a;
+	float3 rgb = c.rgb / max(a, 0.0001);
+
+	float3 lit = ambient;
+	float3 glow = float3(0.0, 0.0, 0.0);
+	apply_light(uv, l0a, l0b, l0c, a, lit, glow);
+	apply_light(uv, l1a, l1b, l1c, a, lit, glow);
+	apply_light(uv, l2a, l2b, l2c, a, lit, glow);
+	apply_light(uv, l3a, l3b, l3c, a, lit, glow);
+
+	float3 lit_rgb = rgb * lit * a;
+	// haze glow: over transparent areas only when haze_alpha is on
+	float ga = saturate(max(max(glow.r, glow.g), glow.b));
+	float out_a = saturate(a + ga * haze_alpha * (1.0 - a));
+	float3 g = glow * lerp(a, 1.0, haze_alpha);
+	float3 outc = lit_rgb + g * (1.0 - saturate(lit_rgb)); // screen-add
+	return float4(outc, out_a);
+}
+
+technique Draw
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSLight(v_in);
+	}
+}
