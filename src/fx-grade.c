@@ -259,7 +259,12 @@ static bool cube_load(struct cube *c, const char *path)
 	c->dmax[0] = c->dmax[1] = c->dmax[2] = 1.0f;
 	size_t count = 0, cap = 0;
 	char *save = NULL;
-	for (char *line = strtok_s(text, "\r\n", &save); line; line = strtok_s(NULL, "\r\n", &save)) {
+#ifdef _WIN32
+#define kg_strtok strtok_s
+#else
+#define kg_strtok strtok_r
+#endif
+	for (char *line = kg_strtok(text, "\r\n", &save); line; line = kg_strtok(NULL, "\r\n", &save)) {
 		while (*line == ' ' || *line == '\t')
 			line++;
 		if (!*line || *line == '#')

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="2">
+    <title>Kagee @VERSION@</title>
+    <welcome file="welcome.html" mime-type="text/html"/>
+    <license file="LICENSE.txt"/>
+    <conclusion file="conclusion.html" mime-type="text/html"/>
+    <options customize="never" require-scripts="false" hostArchitectures="arm64,x86_64"/>
+    <allowed-os-versions>
+        <os-version min="13.0"/>
+    </allowed-os-versions>
+    <!-- OBS loads third-party plugins from ~/Library/Application Support/obs-studio/plugins,
+         so install for the current user only (no administrator password needed). -->
+    <domains enable_anywhere="false" enable_currentUserHome="true" enable_localSystem="false"/>
+    <choices-outline>
+        <line choice="kagee"/>
+    </choices-outline>
+    <choice id="kagee" visible="false">
+        <pkg-ref id="com.hakoniwa.kagee"/>
+    </choice>
+    <pkg-ref id="com.hakoniwa.kagee" version="@VERSION@" onConclusion="none">kagee-component.pkg</pkg-ref>
+</installer-gui-script>

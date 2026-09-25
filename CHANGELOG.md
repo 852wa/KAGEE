@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0
+
+- macOS に対応（Apple シリコン / Intel のユニバーサル版、macOS 13 以降）/ macOS support (universal, macOS 13+)
+  - インストーラー（.pkg、管理者パスワード不要）と zip / .pkg installer (no admin password) and zip
+- OpenGL レンダラーでの表示に対応（シェーダーの互換性を修正）/ Shaders now also compile on the OpenGL renderer
+- push.bat（変更の送信とリリース作成）/ push.bat helper for committing, pushing and tagging releases
+
 ## 0.1.0
 
 最初の公開版 / First public release.

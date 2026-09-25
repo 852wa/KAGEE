@@ -32,8 +32,8 @@ float4 PSBlur(VertData v_in) : TARGET
 	float wsum = 1.0;
 	float inv = 1.0 / (2.0 * sigma * sigma);
 	for (int i = 1; i <= 16; i++) {
-		float w = exp(-(float)(i * i) * inv);
-		float2 o = tap_step * (float)i;
+		float w = exp(-float((i * i)) * inv);
+		float2 o = tap_step * float(i);
 		acc += (image.Sample(linearClamp, v_in.uv + o) + image.Sample(linearClamp, v_in.uv - o)) * w;
 		wsum += 2.0 * w;
 	}

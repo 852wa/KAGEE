@@ -18,10 +18,14 @@ def write(path, text):
         f.write(text)
 
 
-ini = """[General]
+renderer = os.environ.get("KAGEE_RENDERER", "Direct3D 11")  # "OpenGL" exercises the macOS/Linux shader path
+ini = f"""[General]
 FirstRun=true
 EnableAutoUpdates=false
 InfoIncrement=-1
+
+[Video]
+Renderer={renderer}
 
 [Basic]
 Profile=Test

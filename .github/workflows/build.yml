@@ -45,3 +45,41 @@ jobs:
             dist/*.exe
             dist/*.zip
             dist/SHA256SUMS.txt
+
+  macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build and package (universal)
+        run: bash tools/package-macos.sh
+
+      - name: Download OBS Studio for the smoke test
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download 32.2.2 -R obsproject/obs-studio -p 'OBS-Studio-32.2.2-macOS-Apple.dmg' -D "$RUNNER_TEMP"
+          hdiutil attach -nobrowse -readonly -mountpoint "$RUNNER_TEMP/obs" "$RUNNER_TEMP/OBS-Studio-32.2.2-macOS-Apple.dmg"
+          echo "OBS_APP=$(find "$RUNNER_TEMP/obs" -maxdepth 1 -name '*.app' | head -n 1)" >> "$GITHUB_ENV"
+
+      - name: Smoke test (load the plugin into OBS's libobs)
+        run: bash tools/macos-smoke-test.sh
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: kagee-macos-universal
+          path: |
+            dist/*.pkg
+            dist/*.zip
+            dist/SHA256SUMS-macos.txt
+
+      - name: Draft release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v3
+        with:
+          draft: true
+          files: |
+            dist/*.pkg
+            dist/*.zip
+            dist/SHA256SUMS-macos.txt

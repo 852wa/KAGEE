@@ -86,7 +86,7 @@ void apply_light(float2 uv, float4 a, float4 b, float4 c, float alpha, inout flo
 		// sample towards the light at several distances: soft falloff into the subject
 		float behind = 0.0;
 		for (int k = 1; k <= 4; k++)
-			behind += image.Sample(linearClamp, uv + dir * texel * w * ((float)k * 0.25)).a;
+			behind += image.Sample(linearClamp, uv + dir * texel * w * (float(k) * 0.25)).a;
 		float rim = saturate(alpha - behind * 0.25);
 		rim = rim * rim * (3.0 - 2.0 * rim);
 		glow += col * rim * alpha;
