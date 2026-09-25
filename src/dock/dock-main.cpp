@@ -5,6 +5,7 @@
 #include <QPointer>
 
 static QPointer<KageeDock> dock_widget;
+static bool callback_added = false;
 
 static void frontend_event(enum obs_frontend_event event, void *)
 {
@@ -20,9 +21,12 @@ extern "C" void kagee_dock_load(void)
 	dock_widget = new KageeDock(main);
 	obs_frontend_add_dock_by_id("kagee_dock", obs_module_text("Dock.Title"), dock_widget);
 	obs_frontend_add_event_callback(frontend_event, nullptr);
+	callback_added = true;
 }
 
 extern "C" void kagee_dock_unload(void)
 {
-	obs_frontend_remove_event_callback(frontend_event, nullptr);
+	if (callback_added)
+		obs_frontend_remove_event_callback(frontend_event, nullptr);
+	callback_added = false;
 }
