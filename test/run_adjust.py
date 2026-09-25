@@ -43,8 +43,13 @@ async def main():
                         "filterKind": "kagee_retro_filter", "filterSettings": {"mode": 3, "pixel_size": 10}})
         await asyncio.sleep(0.6)
         fx = await grab(obs, "A_filtered")
-        top = (705, 35, 950, 170)       # TopCard area (960px-wide screenshot)
-        lower = (400, 20, 690, 240)   # stage only: avoids the Small card and TopCard
+        # TopCard area, from its real transform (canvas 1920 -> screenshot 960), shrunk 2px to avoid edges
+        tid = await item_id(obs, "TopCard")
+        tr = (await obs.call("GetSceneItemTransform", {"sceneName": "Main", "sceneItemId": tid}))["sceneItemTransform"]
+        k = 960 / 1920
+        top = (int(tr["positionX"] * k) + 2, int(tr["positionY"] * k) + 2,
+               int((tr["positionX"] + tr["width"]) * k) - 2, int((tr["positionY"] + tr["height"]) * k) - 2)
+        lower = (400, 250, 690, 460)   # stage only: avoids the Small card and TopCard
         check("layers below are processed", diff(base, fx, lower) > 3.0, f"diff={diff(base, fx, lower):.2f}")
         check("layer above is untouched", diff(base, fx, top) < 0.5, f"diff={diff(base, fx, top):.2f}")
 

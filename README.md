@@ -9,10 +9,12 @@ OBS のシーンを **奥行きのある3D空間** に変えて、仮想カメ�
 
 ## 動作環境
 
-- Windows 10 / 11（64bit）
+- **Windows** 10 / 11（64bit）、または **macOS** 13 以降（Apple シリコン / Intel）
 - **OBS Studio 32.2 以降**
 
 ## インストール（かんたん）
+
+### Windows
 
 1. [Releases](https://github.com/852wa/KAGEE/releases) から最新の **`Kagee-x.y.z-windows-x64-setup.exe`** をダウンロード
 2. OBS Studio を終了してから、ダウンロードしたファイルをダブルクリック
@@ -21,6 +23,23 @@ OBS のシーンを **奥行きのある3D空間** に変えて、仮想カメ�
 3. 「次へ」で進めて完了。OBS Studio を起動し、メニュー **「ドック」→「Kagee」** でパネルを表示
 
 インストーラーを使いたくない場合は **`Kagee-x.y.z-windows-x64.zip`** を展開し、中の **`install.bat`** をダブルクリックしてください。
+
+### Mac
+
+1. [Releases](https://github.com/852wa/KAGEE/releases) から最新の **`Kagee-x.y.z-macos-universal.pkg`** をダウンロード
+2. OBS Studio を終了してから、ダウンロードしたファイルを **右クリック（または control + クリック）→「開く」**
+   - 普通にダブルクリックすると「開発元を確認できない」と表示されます。その場合は「システム設定」→「プライバシーとセキュリティ」の下の方にある「このまま開く」を押してください
+3. 画面の指示に従ってインストール（管理者パスワードは不要です）。OBS Studio を起動し、メニュー **「ドック」→「Kagee」** でパネルを表示
+
+<details>
+<summary>zip から手動でインストールする場合</summary>
+
+`Kagee-x.y.z-macos-universal.zip` を展開した `kagee.plugin` を `~/Library/Application Support/obs-studio/plugins/` に置き、ターミナルで次を実行してから OBS を起動してください（ダウンロードしたファイルに付く「隔離」の印を外します）。
+
+```bash
+xattr -dr com.apple.quarantine ~/Library/Application\ Support/obs-studio/plugins/kagee.plugin
+```
+</details>
 
 ## 使い方（最短 3 ステップ）
 
@@ -60,13 +79,17 @@ OBS のシーンを **奥行きのある3D空間** に変えて、仮想カメ�
 - **何も表示されない** — ステージにまだレイヤーがありません。パネルの「このシーンのアイテムをレイヤーとして取り込む」を押してください。
 - **ショット 1 と 2 が同じになる** — ショットは「保存を押した時点の画」を記録します。画を変えてから次の番号の「保存」を押してください。
 - **プラグインが読み込まれない** — OBS Studio のバージョンが 32.2 以降か確認してください（ヘルプ → OBS Studio について）。
+- **Mac で「開発元を確認できない」と出る** — 上の「Mac」のインストール手順（右クリック →「開く」）を参照してください。
+- **Mac でエフェクトが表示されない** — OBS の「設定 → 詳細設定 → レンダラー」が **OpenGL**（標準）になっているか確認してください（試験的な Metal には未対応です）。
 
 ## アンインストール
 
-Windows の「設定 → アプリ」から **Kagee** をアンインストールします（zip 版の場合は `uninstall.bat`）。
+- **Windows**: 「設定 → アプリ」から **Kagee** をアンインストール（zip 版の場合は `uninstall.bat`）
+- **Mac**: `~/Library/Application Support/obs-studio/plugins/kagee.plugin` を削除（Finder で「移動 → フォルダへ移動」に上のパスを入力）
 
 ## 開発者向け
 
+### Windows
 必要なもの: Visual Studio 2022（C++ によるデスクトップ開発）、CMake 3.24 以降、Git、Inno Setup 6（インストーラーを作る場合のみ）
 
 ```bash
@@ -76,10 +99,21 @@ cmake --build build --config Release
 powershell -ExecutionPolicy Bypass -File tools/package.ps1
 ```
 
-- `tools/fetch-deps.ps1` が OBS のヘッダーと、OBS に同梱されているものと同じ Qt パッケージ（ハッシュ検証付き）を `.deps/` に取得します。
-- OBS の各 DLL 用インポートライブラリは `sdk/lib/*.def` から生成されます（OBS 本体のビルドは不要）。
-- `tools/package.ps1` で `dist/` にインストーラーと zip を作成します。`v*` タグを push すると GitHub Actions がリリースの下書きを作成します。
-- `test/` には、ポータブル版 OBS を obs-websocket で操作して描画と動作を検証するスクリプトがあります（`test/redeploy.ps1` → `python test/run_*.py`）。
+### macOS
+必要なもの: Xcode（コマンドラインツール）、CMake 3.24 以降、Git
+
+```bash
+bash tools/package-macos.sh
+```
+
+- `tools/fetch-deps.ps1` / `tools/fetch-deps.sh` が OBS のヘッダーと、OBS に同梱されているものと同じ Qt パッケージ（ハッシュ検証付き）を `.deps/` に取得します。
+- Windows では OBS の各 DLL 用インポートライブラリを `sdk/lib/*.def` から生成し、macOS では読み込み時に OBS 本体の関数を使います（どちらも OBS 本体のビルドは不要）。
+- パッケージは `dist/` に作成されます。GitHub Actions では macOS 版を実際の OBS Studio に読み込ませる確認（`tools/macos-smoke-test.sh`）も行います。
+- `test/` には、ポータブル版 OBS を obs-websocket で操作して描画と動作を検証するスクリプトがあります（`test/redeploy.ps1` → `python test/run_*.py`、環境変数 `KAGEE_RENDERER=OpenGL` で Mac と同じ OpenGL 描画を検証）。
+
+### 変更の送信とリリース（push.bat）
+リポジトリ直下の **`push.bat`** をダブルクリックすると、変更をまとめて GitHub に送信します（コミットメッセージを入力するだけ）。
+最後に「リリースも作りますか？」と聞かれたら `y` を入力すると、`CMakeLists.txt` のバージョン番号でタグを付けて送信し、数分後に Windows / Mac 両方のインストーラー入りのリリース下書きが作られます。新しいリリースを作る前に `project(kagee VERSION x.y.z ...)` の番号を上げてください。
 
 ## ライセンス
 
@@ -91,9 +125,11 @@ powershell -ExecutionPolicy Bypass -File tools/package.ps1
 
 **Kagee** turns an OBS scene into a 3D space and lets you film it with a virtual camera — camera moves, lighting, color grading and cinematic screen effects — right inside OBS Studio.
 
-**Requirements:** Windows 10/11 (64-bit), **OBS Studio 32.2 or later**.
+**Requirements:** Windows 10/11 (64-bit) or macOS 13+ (Apple silicon / Intel), **OBS Studio 32.2 or later**.
 
-**Install:** download `Kagee-x.y.z-windows-x64-setup.exe` from [Releases](https://github.com/852wa/KAGEE/releases), close OBS, run it, then open the panel from **Docks → Kagee**. (Alternatively unzip `Kagee-x.y.z-windows-x64.zip` and double-click `install.bat`.)
+**Install (Windows):** download `Kagee-x.y.z-windows-x64-setup.exe` from [Releases](https://github.com/852wa/KAGEE/releases), close OBS, run it, then open the panel from **Docks → Kagee**. (Alternatively unzip `Kagee-x.y.z-windows-x64.zip` and double-click `install.bat`.)
+
+**Install (Mac):** download `Kagee-x.y.z-macos-universal.pkg`, quit OBS, **right-click → Open** the package (the installer is not notarized; if blocked, use System Settings → Privacy & Security → "Open Anyway"), then open **Docks → Kagee**. No administrator password is needed. Use the default OpenGL renderer (the experimental Metal renderer is not supported).
 
 **Quick start:**
 1. Add **Kagee 3D Stage** at the **top** of the scene you want in 3D.
@@ -102,8 +138,8 @@ powershell -ExecutionPolicy Bypass -File tools/package.ps1
 
 **Features:** 3D multiplane stage with a virtual camera, shots that store camera + layer layout (12 camera presets), depth of field, adjustment layer, color grading (10 looks, .cube LUT import/export), lighting (spot / beam / rim), lens, retro (VHS/CRT/film/game/LED/halftone), glow & flares, blur, glitch and motion-trail filters, hotkeys, BPM / tap-tempo automation, and a dockable panel with Easy and Detailed modes (Japanese and English UI).
 
-**Uninstall:** Windows Settings → Apps → Kagee.
+**Uninstall:** Windows Settings → Apps → Kagee. Mac: delete `~/Library/Application Support/obs-studio/plugins/kagee.plugin`.
 
-**Build:** see the developer section above (`tools/fetch-deps.ps1`, CMake, `tools/package.ps1`).
+**Build:** see the developer section above (`tools/package.ps1` on Windows, `tools/package-macos.sh` on macOS).
 
 **License:** [MIT](LICENSE) © 2026 hakoniwa

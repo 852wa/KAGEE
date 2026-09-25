@@ -62,7 +62,7 @@ float4 PSZoom(VertData v_in) : TARGET
 	float4 acc = float4(0.0, 0.0, 0.0, 0.0);
 	float wsum = 0.0;
 	for (int i = 0; i < 32; i++) {
-		float t = (float)i / 31.0;
+		float t = float(i) / 31.0;
 		float s = 1.0 - zoom * t;
 		float a = spin * (t - 0.5);
 		float ca = cos(a);
