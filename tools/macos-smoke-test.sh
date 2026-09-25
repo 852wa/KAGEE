@@ -10,7 +10,7 @@ echo "libobs:   $fw/libobs.framework"
 echo "frontend: $frontend"
 
 clang -O1 -o "$root/build_macos/kagee-smoke" "$root/tools/macos-smoke-test.c" \
-  -I "$root/.deps/obs-studio/libobs" -I "$root/sdk/include" -DHAVE_OBSCONFIG_H \
+  -I "$root/.deps/obs-studio/libobs" -I "$root/.deps/simde" -I "$root/sdk/include" -DHAVE_OBSCONFIG_H \
   -F "$fw" -framework libobs "$frontend" \
   -Wl,-rpath,"$fw" -mmacosx-version-min=13.0
 

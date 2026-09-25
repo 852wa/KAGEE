@@ -86,6 +86,7 @@ elseif(APPLE)
     set_source_files_properties("data/${f}" PROPERTIES MACOSX_PACKAGE_LOCATION "Resources/${dir}")
     target_sources(kagee PRIVATE "data/${f}")
   endforeach()
+  target_include_directories(kagee PRIVATE "${CMAKE_SOURCE_DIR}/.deps/simde")
   # libobs / frontend API symbols come from the OBS process that loads the plugin
   target_link_options(kagee PRIVATE -undefined dynamic_lookup)
   target_compile_options(kagee PRIVATE -Wall -Wno-unused-parameter -Wno-missing-braces)
