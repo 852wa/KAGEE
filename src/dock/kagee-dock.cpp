@@ -20,6 +20,8 @@
 #include <QAbstractItemView>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
+#include <QPainter>
+#include <QStyle>
 #include <cmath>
 #include <functional>
 #include <string>
@@ -34,6 +36,53 @@ static const char *FX_IDS[] = {"kagee_lens_filter", "kagee_glow_filter",   "kage
 			       "kagee_retro_filter", "kagee_glitch_filter", "kagee_trail_filter"};
 static constexpr int MAX_SHOTS = 8;
 static constexpr int MAX_LAYERS = 8;
+
+/* Small vector thumbnails keep the first-run guide crisp at any dock scale. */
+class SetupStepIcon final : public QWidget {
+	int step;
+
+public:
+	explicit SetupStepIcon(int number, QWidget *parent = nullptr) : QWidget(parent), step(number)
+	{
+		setFixedSize(62, 42);
+	}
+
+protected:
+	void paintEvent(QPaintEvent *) override
+	{
+		QPainter p(this);
+		p.setRenderHint(QPainter::Antialiasing);
+		p.setPen(QPen(QColor(105, 135, 255), 2));
+		p.setBrush(QColor(36, 41, 55));
+		p.drawRoundedRect(QRectF(1, 1, width() - 2, height() - 2), 6, 6);
+		const QRectF screen(8, 7, 46, 28);
+		p.setPen(QPen(QColor(115, 126, 153), 1));
+		p.setBrush(QColor(22, 26, 35));
+		p.drawRoundedRect(screen, 3, 3);
+		if (step == 1) {
+			p.setPen(QPen(QColor(100, 170, 255), 2));
+			p.drawLine(13, 28, 27, 13);
+			p.drawLine(27, 13, 49, 26);
+			p.setBrush(QColor(255, 184, 86));
+			p.setPen(Qt::NoPen);
+			p.drawEllipse(QPointF(31, 19), 3, 3);
+		} else if (step == 2) {
+			p.setPen(Qt::NoPen);
+			p.setBrush(QColor(66, 103, 214));
+			p.drawRoundedRect(QRectF(13, 12, 32, 6), 2, 2);
+			p.setBrush(QColor(109, 166, 235));
+			p.drawRoundedRect(QRectF(18, 21, 25, 6), 2, 2);
+			p.setBrush(QColor(255, 184, 86));
+			p.drawEllipse(QPointF(31, 30), 3, 3);
+		} else {
+			for (int i = 0; i < 3; ++i) {
+				p.setPen(Qt::NoPen);
+				p.setBrush(i == 1 ? QColor(255, 184, 86) : QColor(66, 103, 214));
+				p.drawRoundedRect(QRectF(13 + i * 13, 13, 10, 15), 2, 2);
+			}
+		}
+	}
+};
 
 static bool is_kagee_target(obs_source_t *src)
 {
@@ -475,7 +524,28 @@ QWidget *KageeDock::setupBanner(obs_source_t *src, bool always)
 		return nullptr;
 
 	auto *box = new QGroupBox(configured > 0 ? T_("Dock.ImportTitle") : T_("Dock.SetupTitle"));
+	box->setObjectName("setup_banner");
 	auto *v = new QVBoxLayout(box);
+	if (configured == 0) {
+		auto *steps = new QHBoxLayout();
+		steps->setSpacing(4);
+		const char *keys[] = {"Dock.StepAdd", "Dock.StepImport", "Dock.StepShot"};
+		for (int i = 0; i < 3; ++i) {
+			auto *item = new QWidget(box);
+			auto *layout = new QVBoxLayout(item);
+			layout->setContentsMargins(2, 2, 2, 2);
+			layout->setSpacing(3);
+			auto *icon = new SetupStepIcon(i + 1, item);
+			layout->addWidget(icon, 0, Qt::AlignHCenter);
+			auto *caption = new QLabel(T_(keys[i]), item);
+			caption->setWordWrap(true);
+			caption->setAlignment(Qt::AlignCenter);
+			caption->setStyleSheet("font-size: 10px;"); /* colour follows the OBS theme */
+			layout->addWidget(caption);
+			steps->addWidget(item, 1);
+		}
+		v->addLayout(steps);
+	}
 	auto *l = new QLabel(configured > 0 ? T_("Dock.ImportText") : T_("Dock.SetupText"), box);
 	l->setWordWrap(true);
 	auto *b = new QPushButton(T_("Dock.Import"), box);
@@ -822,6 +892,14 @@ void KageeDock::pollState()
 		}
 		b->setChecked(i == cur);
 		b->setEnabled(valid);
+		/* restyle only when the saved/empty state changes (this runs every 150 ms) */
+		QVariant prev = b->property("savedShot");
+		if (i > 0 && (!prev.isValid() || prev.toBool() != valid)) {
+			b->setToolTip(valid ? T_("Dock.ShotSavedTip") : T_("Dock.ShotEmptyTip"));
+			b->setProperty("savedShot", valid);
+			b->style()->unpolish(b);
+			b->style()->polish(b);
+		}
 	}
 	for (int i = 0; i < (int)easyPresetCombos.size(); i++) {
 		QComboBox *combo = easyPresetCombos[i];
@@ -1188,7 +1266,11 @@ QWidget *KageeDock::buildEasyPage(obs_source_t *src)
 		auto *go = new QPushButton(QString::number(i), shots);
 		go->setCheckable(true);
 		go->setMinimumSize(44, 30);
-		go->setToolTip(T_("Dock.GoTip"));
+		go->setToolTip(T_("Dock.ShotEmptyTip"));
+		go->setObjectName(QString("easy_shot_%1").arg(i));
+		/* one stylesheet for all states; pollState only flips the savedShot property */
+		go->setStyleSheet("QPushButton[savedShot=\"true\"] { border: 1px solid #6687f5; }"
+				  "QPushButton:checked { background: #3157c8; border: 1px solid #8fa7ff; }");
 		QFont f = go->font();
 		f.setBold(true);
 		go->setFont(f);
@@ -1216,6 +1298,7 @@ QWidget *KageeDock::buildEasyPage(obs_source_t *src)
 				proc_handler_call(obs_source_get_proc_handler(t), "kagee_apply_preset", &cd);
 				calldata_free(&cd);
 				obs_source_release(t);
+				QTimer::singleShot(0, this, &KageeDock::pollState);
 				callAction("kagee_shot", nullptr, i); /* show it right away */
 			}
 		});

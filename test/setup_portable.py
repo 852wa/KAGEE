@@ -114,11 +114,24 @@ sources = [
          item("TopCard", 4, pos=(1400.0, 60.0), scale=0.12),
      ]}},
 ]
+
+# "Many": 10 items under an empty stage, to check the 8-layer import limit
+many_items = []
+for i in range(10):
+    name = f"M{i}"
+    sources.append(image(name, os.path.join(assets, "card.png" if i % 2 else "card2.png")))
+    many_items.append(item(name, i + 1, pos=(60.0 + (i % 5) * 360.0, 100.0 + (i // 5) * 450.0), scale=0.2))
+sources.append({"id": "kagee_stage", "versioned_id": "kagee_stage", "name": "MStage", "settings": {}, "filters": []})
+many_items.append(item("MStage", 11))
+sources.append({"id": "scene", "versioned_id": "scene", "name": "Many",
+                "settings": {"id_counter": 11, "custom_size": False, "items": many_items}})
+
+start = os.environ.get("KAGEE_TEST_SCENE", "Main")
 scene = {
     "name": "Test",
-    "current_scene": "Main",
-    "current_program_scene": "Main",
-    "scene_order": [{"name": "Main"}, {"name": "Assets"}, {"name": "UserLike"}],
+    "current_scene": start,
+    "current_program_scene": start,
+    "scene_order": [{"name": "Main"}, {"name": "Assets"}, {"name": "UserLike"}, {"name": "Many"}],
     "sources": sources,
     "groups": [],
     "transitions": [],

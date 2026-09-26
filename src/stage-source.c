@@ -991,8 +991,10 @@ static int import_scene_items(struct stage *s)
 	obs_data_release(settings);
 	obs_source_update(s->context, NULL);
 
-	for (int k = 0; k < n; k++)
-		obs_sceneitem_set_visible(ctx.items[first + k], false);
+	/* Only hide items that were copied into a layer. Anything beyond the
+	 * eight-layer limit remains visible in the original scene. */
+	for (int k = first; k < ctx.count; k++)
+		obs_sceneitem_set_visible(ctx.items[k], false);
 	blog_kg(LOG_INFO, "'%s': imported %d scene items as layers", obs_source_get_name(s->context), n);
 	return n;
 }
